@@ -56,3 +56,14 @@ setup() { src; reset_state; USE_COLOR=0; setup_color; }
   run grep -c $'\x1b' "$ROOT/report.txt"
   [ "$output" -eq 0 ]
 }
+
+@test "strip_ansi removes real ANSI escape sequences" {
+  run bash -c 'source "$1"; printf "\033[1;31mred\033[0m and \033[2mdim\033[0m\n" | strip_ansi' _ "$REVELIO"
+  [ "$status" -eq 0 ]
+  [ "$output" = "red and dim" ]
+}
+
+@test "exit 10 when an attention item is present" {
+  run bash -c 'source "$1"; emit attention test "planted" "detail" ""; revelio_main --no-color' _ "$REVELIO"
+  [ "$status" -eq 10 ]
+}

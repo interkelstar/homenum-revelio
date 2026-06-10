@@ -42,9 +42,9 @@ setup_color() {
 # ---- finding buffer ----------------------------------------------------------
 # emit TIER CATEGORY TITLE DETAIL [REMEDIATION]
 emit() {
-  local tier="$1" cat="$2" title="$3" detail="${4:-}" rem="${5:-}"
+  local tier="$1" category="$2" title="$3" detail="${4:-}" rem="${5:-}"
   local pd="${detail//$'\n'/$'\x1e'}"          # pack newlines so the record is one line
-  _ITEMS+=("$tier"$'\x1f'"$cat"$'\x1f'"$title"$'\x1f'"$pd"$'\x1f'"$rem")
+  _ITEMS+=("$tier"$'\x1f'"$category"$'\x1f'"$title"$'\x1f'"$pd"$'\x1f'"$rem")
   case "$tier" in
     attention) _N_ATTENTION=$((_N_ATTENTION + 1)) ;;
     normal)    _N_NORMAL=$((_N_NORMAL + 1)) ;;
@@ -56,11 +56,11 @@ blindspot() { _BLINDSPOTS+=("$1"); }
 _print_detail() { # indent each line of a (newline-joined) detail block
   local block="$1" pre="$2" l
   [ -n "$block" ] || return 0
-  while IFS= read -r l; do printf '      %s%s%s\n' "$pre" "$l" "$C_RST"; done <<<"$block"
+  while IFS= read -r l; do printf '      %s%s%s\n' "$pre" "$l" "$C_RST"; done < <(printf '%s\n' "${block%$'\n'}")
 }
 
 revelio_render() {
-  local rec tier cat title pd rem detail
+  local rec tier cat title pd rem detail b
   printf '%sHomenum Revelio%s — access inventory for %s\n\n' \
          "$C_BOLD" "$C_RST" "${REVELIO_ROOT:-/}"
 
@@ -95,7 +95,6 @@ revelio_render() {
 
   if [ "${#_BLINDSPOTS[@]}" -gt 0 ]; then
     printf "%s! COULDN'T CHECK WITHOUT ROOT (%d)%s\n" "$C_YEL" "${#_BLINDSPOTS[@]}" "$C_RST"
-    local b
     for b in "${_BLINDSPOTS[@]}"; do printf '  • %s\n' "$b"; done
     printf '  %sre-run as root to include these: sudo %s%s\n\n' "$C_DIM" "$REVELIO_SELF" "$C_RST"
   fi
