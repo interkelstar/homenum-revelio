@@ -5,7 +5,13 @@ setup() { src; reset_state; }
 
 @test "pkg_owns returns 2 (undeterminable) when no package manager" {
   _PM=none
-  run pkg_owns /etc/anything
+  run pkg_owns "$REVELIO"
+  [ "$status" -eq 2 ]
+}
+
+@test "pkg_owns returns 2 for a non-existent path" {
+  _PM=rpm
+  run pkg_owns /no/such/path/xyz123
   [ "$status" -eq 2 ]
 }
 

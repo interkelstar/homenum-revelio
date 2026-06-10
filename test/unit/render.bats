@@ -67,3 +67,15 @@ setup() { src; reset_state; USE_COLOR=0; setup_color; }
   run bash -c 'source "$1"; emit attention test "planted" "detail" ""; revelio_main --no-color' _ "$REVELIO"
   [ "$status" -eq 10 ]
 }
+
+@test "render names the package manager used for provenance" {
+  reset_state; _PM=rpm
+  out="$(revelio_render)"
+  [[ "$out" == *"provenance checked against the rpm package database"* ]]
+}
+
+@test "render warns when no package manager is detected" {
+  reset_state; _PM=none
+  out="$(revelio_render)"
+  [[ "$out" == *"no package manager detected"* ]]
+}

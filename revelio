@@ -61,8 +61,12 @@ _print_detail() { # indent each line of a (newline-joined) detail block
 
 revelio_render() {
   local rec tier cat title pd rem detail b
-  printf '%sHomenum Revelio%s — access inventory for %s\n\n' \
-         "$C_BOLD" "$C_RST" "${REVELIO_ROOT:-/}"
+  printf '%sHomenum Revelio%s — access inventory for %s\n' "$C_BOLD" "$C_RST" "${REVELIO_ROOT:-/}"
+  if [ -z "${_PM:-}" ] || [ "${_PM:-}" = none ]; then
+    printf '%sno package manager detected — provenance unverifiable; every item shown for your review%s\n\n' "$C_YEL" "$C_RST"
+  else
+    printf '%sprovenance checked against the %s package database%s\n\n' "$C_DIM" "$_PM" "$C_RST"
+  fi
 
   printf '%s↑ NEEDS YOUR EYES (%d)%s\n' "$C_RED" "$_N_ATTENTION" "$C_RST"
   [ "$_N_ATTENTION" -eq 0 ] && printf '  (none)\n'
@@ -110,6 +114,10 @@ revelio_getcap()  { getcap "$@"; }
 revelio_ps()      { ps "$@"; }
 
 # ---- provenance --------------------------------------------------------------
+# Precedence: rpm first (RHEL/CentOS/Fedora are the primary handover targets),
+# then dpkg (Debian/Ubuntu), pacman (Arch), apk (Alpine). If a tool is present but
+# its DB doesn't own a queried path, pkg_owns returns 1 (not-owned) -> the item is
+# shown as needs-eyes. That is the SAFE direction (loud, never silently "normal").
 revelio_pm_detect() {
   if   command -v rpm    >/dev/null 2>&1; then _PM=rpm
   elif command -v dpkg   >/dev/null 2>&1; then _PM=dpkg
@@ -121,6 +129,7 @@ revelio_pm_detect() {
 # pkg_owns PATH -> 0 owned, 1 not owned, 2 undeterminable
 pkg_owns() {
   local p="$1"
+  [ -e "$p" ] || return 2
   case "$_PM" in
     rpm)    rpm    -qf     "$p" >/dev/null 2>&1 ;;
     dpkg)   dpkg   -S      "$p" >/dev/null 2>&1 ;;
