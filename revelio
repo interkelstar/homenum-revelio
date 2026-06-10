@@ -332,10 +332,30 @@ check_listening() {
   return 0
 }
 
+check_tunnels() {
+  if [ -n "$REVELIO_ROOT" ]; then
+    blindspot "outbound tunnels (live-only; not available when auditing REVELIO_ROOT)"
+    return 0
+  fi
+  local line cmd
+  while IFS= read -r line; do
+    cmd="${line#"${line%%[![:space:]]*}"}"   # ltrim
+    cmd="${cmd#* }"                            # drop pid column
+    case "$cmd" in
+      autossh*) emit attention tunnel "autossh persistent tunnel" "cmd: $cmd" "kill the autossh process / remove its unit if unexpected" ;;
+      *ssh*-R*) emit attention tunnel "ssh reverse tunnel (-R)" "cmd: $cmd" "kill the ssh -R process if unexpected" ;;
+      *cloudflared*tunnel*) emit attention tunnel "cloudflared tunnel running" "cmd: $cmd" "this exposes the box outward; remove if you didn't set it up" ;;
+      *ngrok*|*frpc*|*frps*|*tailscaled*|*zerotier*) emit attention tunnel "remote-access daemon: ${cmd%% *}" "cmd: $cmd" "remove the daemon if you didn't set it up" ;;
+    esac
+  done < <(revelio_ps -eo pid=,args= 2>/dev/null)
+  return 0
+}
+
 run_all_checks() {
   check_ssh
   check_accounts
   check_listening
+  check_tunnels
 }
 
 revelio_main() {
