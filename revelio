@@ -104,6 +104,45 @@ revelio_render() {
 
 strip_ansi() { sed -E $'s/\x1b\\[[0-9;]*m//g'; }
 
+# ---- command wrappers (overridable in tests) --------------------------------
+revelio_ss()      { ss "$@"; }
+revelio_getcap()  { getcap "$@"; }
+revelio_ps()      { ps "$@"; }
+
+# ---- provenance --------------------------------------------------------------
+revelio_pm_detect() {
+  if   command -v rpm    >/dev/null 2>&1; then _PM=rpm
+  elif command -v dpkg   >/dev/null 2>&1; then _PM=dpkg
+  elif command -v pacman >/dev/null 2>&1; then _PM=pacman
+  elif command -v apk    >/dev/null 2>&1; then _PM=apk
+  else _PM=none; fi
+}
+
+# pkg_owns PATH -> 0 owned, 1 not owned, 2 undeterminable
+pkg_owns() {
+  local p="$1"
+  case "$_PM" in
+    rpm)    rpm    -qf     "$p" >/dev/null 2>&1 ;;
+    dpkg)   dpkg   -S      "$p" >/dev/null 2>&1 ;;
+    pacman) pacman -Qo     "$p" >/dev/null 2>&1 ;;
+    apk)    apk    info -W "$p" >/dev/null 2>&1 ;;
+    *)      return 2 ;;
+  esac
+}
+
+# classify_provenance PATH CATEGORY TITLE DETAIL REMEDIATION
+# package-owned -> normal; not owned -> attention; undeterminable -> attention+note
+classify_provenance() {
+  local path="$1" cat="$2" title="$3" detail="$4" rem="${5:-}"
+  local _rc=0
+  pkg_owns "$path" || _rc=$?
+  case $_rc in
+    0) emit normal    "$cat" "$title" "$detail" "$rem" ;;
+    1) emit attention "$cat" "$title" "$detail" "$rem" ;;
+    2) emit attention "$cat" "$title (provenance undeterminable: no package manager)" "$detail" "$rem" ;;
+  esac
+}
+
 # ---- cli ---------------------------------------------------------------------
 usage() {
   cat <<'EOF'
@@ -156,6 +195,7 @@ run_all_checks() {
 revelio_main() {
   parse_args "$@"
   setup_color
+  revelio_pm_detect
   run_all_checks
   local out; out="$(revelio_render)"
   printf '%s\n' "$out"
