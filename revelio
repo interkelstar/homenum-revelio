@@ -355,11 +355,61 @@ check_tunnels() {
   return 0
 }
 
+_is_fetch_exec() { # 0 if text pipes a download into a shell (or decodes into one)
+  printf '%s' "$1" | grep -qE "$FETCHEXEC_RE"
+}
+
+check_scheduled() {
+  local f content
+  # /etc/cron.d + /etc/cron.{hourly,daily,weekly,monthly} + /etc/crontab
+  for f in "$REVELIO_ROOT"/etc/cron.d/* \
+           "$REVELIO_ROOT"/etc/cron.hourly/* "$REVELIO_ROOT"/etc/cron.daily/* \
+           "$REVELIO_ROOT"/etc/cron.weekly/* "$REVELIO_ROOT"/etc/cron.monthly/* \
+           "$REVELIO_ROOT/etc/crontab"; do
+    [ -f "$f" ] || continue
+    content="$(grep -vE '^\s*(#|$)' "$f" 2>/dev/null | head -20)"
+    local rem="remove ${f#"$REVELIO_ROOT"} if you didn't create it"
+    local detail="file: ${f#"$REVELIO_ROOT"}"$'\n'"$content"
+    if _is_fetch_exec "$content"; then
+      emit attention sched "Cron job that fetch-execs: ${f##*/}" "$detail" "$rem"
+    else
+      classify_provenance "$f" sched "Cron job: ${f##*/}" "$detail" "$rem"
+    fi
+  done
+
+  # per-user crontabs (need root for others)
+  local spool="$REVELIO_ROOT/var/spool/cron"
+  if [ -d "$spool" ]; then
+    for f in "$spool"/* "$spool"/crontabs/*; do
+      [ -f "$f" ] || continue
+      content="$(grep -vE '^\s*(#|$)' "$f" 2>/dev/null | head -20)"
+      emit attention sched "User crontab: ${f##*/}" "file: ${f#"$REVELIO_ROOT"}"$'\n'"$content" \
+        "crontab -u ${f##*/} -e   # review"
+    done
+  fi
+
+  # systemd timers (live-only)
+  if [ -z "$REVELIO_ROOT" ] && command -v systemctl >/dev/null 2>&1; then
+    local unit
+    while read -r unit _; do
+      case "$unit" in *.timer)
+        local svc="${unit%.timer}.service"
+        local path; path="$(systemctl show -p FragmentPath --value "$unit" 2>/dev/null)"
+        if [ -n "$path" ]; then
+          classify_provenance "$path" sched "systemd timer: $unit" "unit file: $path" "systemctl disable --now $unit   # if unexpected"
+        fi
+      ;; esac
+    done < <(systemctl list-timers --all --no-legend 2>/dev/null | awk '{print $NF}')
+  fi
+  return 0
+}
+
 run_all_checks() {
   check_ssh
   check_accounts
   check_listening
   check_tunnels
+  check_scheduled
 }
 
 revelio_main() {
