@@ -27,6 +27,84 @@ _PM=""
 FETCHEXEC_RE='(curl|wget)[^|]*\| *(sh|bash|zsh)|base64 +(-d|--decode)[^|]*\| *(sh|bash)'
 REVSHELL_RE='bash -i|sh -i|/dev/tcp/|nc .*-e'
 
+# ---- colour ------------------------------------------------------------------
+setup_color() {
+  if [ "$NO_COLOR_FLAG" -eq 1 ] || [ -n "${NO_COLOR:-}" ] || [ ! -t 1 ]; then
+    USE_COLOR=0
+  fi
+  if [ "$USE_COLOR" -eq 1 ]; then
+    C_RED=$'\e[31m'; C_YEL=$'\e[33m'; C_DIM=$'\e[2m'; C_BOLD=$'\e[1m'; C_RST=$'\e[0m'
+  else
+    C_RED=""; C_YEL=""; C_DIM=""; C_BOLD=""; C_RST=""
+  fi
+}
+
+# ---- finding buffer ----------------------------------------------------------
+# emit TIER CATEGORY TITLE DETAIL [REMEDIATION]
+emit() {
+  local tier="$1" cat="$2" title="$3" detail="${4:-}" rem="${5:-}"
+  local pd="${detail//$'\n'/$'\x1e'}"          # pack newlines so the record is one line
+  _ITEMS+=("$tier"$'\x1f'"$cat"$'\x1f'"$title"$'\x1f'"$pd"$'\x1f'"$rem")
+  case "$tier" in
+    attention) _N_ATTENTION=$((_N_ATTENTION + 1)) ;;
+    normal)    _N_NORMAL=$((_N_NORMAL + 1)) ;;
+  esac
+}
+
+blindspot() { _BLINDSPOTS+=("$1"); }
+
+_print_detail() { # indent each line of a (newline-joined) detail block
+  local block="$1" pre="$2" l
+  [ -n "$block" ] || return 0
+  while IFS= read -r l; do printf '      %s%s%s\n' "$pre" "$l" "$C_RST"; done <<<"$block"
+}
+
+revelio_render() {
+  local rec tier cat title pd rem detail
+  printf '%sHomenum Revelio%s — access inventory for %s\n\n' \
+         "$C_BOLD" "$C_RST" "${REVELIO_ROOT:-/}"
+
+  printf '%s↑ NEEDS YOUR EYES (%d)%s\n' "$C_RED" "$_N_ATTENTION" "$C_RST"
+  [ "$_N_ATTENTION" -eq 0 ] && printf '  (none)\n'
+  for rec in "${_ITEMS[@]:-}"; do
+    [ -n "$rec" ] || continue
+    IFS=$'\x1f' read -r tier cat title pd rem <<<"$rec"
+    [ "$tier" = attention ] || continue
+    detail="${pd//$'\x1e'/$'\n'}"
+    printf '  %s•%s [%s] %s\n' "$C_RED" "$C_RST" "$cat" "$title"
+    _print_detail "$detail" ""
+    [ -n "$rem" ] && printf '      %s-> if not yours: %s%s\n' "$C_DIM" "$rem" "$C_RST"
+  done
+  printf '\n'
+
+  if [ "$VERBOSE" -eq 1 ]; then
+    printf '%s+ distro-normal (%d)%s\n' "$C_DIM" "$_N_NORMAL" "$C_RST"
+    for rec in "${_ITEMS[@]:-}"; do
+      [ -n "$rec" ] || continue
+      IFS=$'\x1f' read -r tier cat title pd rem <<<"$rec"
+      [ "$tier" = normal ] || continue
+      detail="${pd//$'\x1e'/$'\n'}"
+      printf '  %s+ [%s] %s%s\n' "$C_DIM" "$cat" "$title" "$C_RST"
+      _print_detail "$detail" "$C_DIM"
+    done
+  else
+    printf '%s+ distro-normal (%d) — package-owned; show with -v%s\n' \
+           "$C_DIM" "$_N_NORMAL" "$C_RST"
+  fi
+  printf '\n'
+
+  if [ "${#_BLINDSPOTS[@]}" -gt 0 ]; then
+    printf "%s! COULDN'T CHECK WITHOUT ROOT (%d)%s\n" "$C_YEL" "${#_BLINDSPOTS[@]}" "$C_RST"
+    local b
+    for b in "${_BLINDSPOTS[@]}"; do printf '  • %s\n' "$b"; done
+    printf '  %sre-run as root to include these: sudo %s%s\n\n' "$C_DIM" "$REVELIO_SELF" "$C_RST"
+  fi
+
+  printf 'This is the complete inventory we could read. You decide which you recognise.\n'
+}
+
+strip_ansi() { sed -E $'s/\x1b\\[[0-9;]*m//g'; }
+
 # ---- cli ---------------------------------------------------------------------
 usage() {
   cat <<'EOF'
@@ -72,9 +150,20 @@ parse_args() {
   done
 }
 
+run_all_checks() {
+  :  # check_* calls are appended here as each is implemented (Tasks 5-11)
+}
+
 revelio_main() {
   parse_args "$@"
-  echo "revelio $VERSION (skeleton)"   # replaced in Task 2
+  setup_color
+  run_all_checks
+  local out; out="$(revelio_render)"
+  printf '%s\n' "$out"
+  if [ -n "$SAVE_FILE" ]; then
+    printf '%s\n' "$out" | strip_ansi > "$SAVE_FILE"
+  fi
+  [ "$_N_ATTENTION" -gt 0 ] && return 10
   return 0
 }
 
