@@ -207,7 +207,7 @@ _home_dirs() {
 }
 
 check_ssh() {
-  local home ak line ftype comment mtime
+  local home ak line mtime
   # 1) authorized_keys in every home
   while IFS= read -r home; do
     ak="$home/.ssh/authorized_keys"
@@ -216,10 +216,18 @@ check_ssh() {
     while IFS= read -r line; do
       [ -n "$line" ] || continue
       case "$line" in \#*) continue ;; esac
-      ftype="${line%% *}"
-      comment="${line##* }"
+      local ktype="(unknown)" kcomment="(none)" _kf j
+      read -ra _kf <<<"$line"
+      for j in "${!_kf[@]}"; do
+        case "${_kf[$j]}" in
+          ssh-*|ecdsa-*|sk-ssh-*|sk-ecdsa-*)
+            ktype="${_kf[$j]}"
+            [ $((j + 2)) -lt "${#_kf[@]}" ] && kcomment="${_kf[*]:$((j + 2))}"
+            break ;;
+        esac
+      done
       emit attention ssh "SSH key in ${ak#"$REVELIO_ROOT"}" \
-        "type: $ftype"$'\n'"comment: $comment"$'\n'"file mtime: $mtime" \
+        "type: $ktype"$'\n'"comment: $kcomment"$'\n'"file mtime: $mtime" \
         "edit ${ak#"$REVELIO_ROOT"} and delete the line if you don't recognise it"
     done < "$ak"
   done < <(_home_dirs)
@@ -235,6 +243,7 @@ check_ssh() {
       TrustedUserCAKeys)     emit attention ssh "TrustedUserCAKeys set" "cert-based access trusting CA '$val' — anyone with the CA private key can mint a login" "review/remove this line in $cfg" ;;
     esac
   done < <(grep -iE '^[[:space:]]*(PermitRootLogin|PasswordAuthentication|AuthorizedKeysCommand|TrustedUserCAKeys)[[:space:]]' "$cfg" 2>/dev/null) || true
+  return 0
 }
 
 check_accounts() {
@@ -265,7 +274,7 @@ check_accounts() {
       fi
     done < "$shadow"
   else
-    [ -f "$shadow" ] || blindspot "/etc/shadow (need root to read empty-password accounts)"
+    [ -f "$shadow" ] && blindspot "/etc/shadow (need root to read empty-password accounts)"
   fi
 
   # 3) sudoers NOPASSWD
@@ -290,6 +299,7 @@ check_accounts() {
       esac
     done < "$group"
   fi
+  return 0
 }
 
 run_all_checks() {

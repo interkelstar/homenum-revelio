@@ -44,3 +44,30 @@ EOF
   check_accounts
   emitted attention "docker group"
 }
+
+@test "unreadable /etc/shadow emits a blindspot, not a silent skip" {
+  [ "$(id -u)" -eq 0 ] && skip "must run as non-root to make shadow unreadable"
+  printf 'root:$6$abc:19000:0:99999:7:::\n' > "$ROOT/etc/shadow"
+  chmod 000 "$ROOT/etc/shadow"
+  reset_state
+  check_accounts
+  [[ " ${_BLINDSPOTS[*]:-} " == *"/etc/shadow"* ]]
+}
+
+@test "clean accounts fixture -> no attention items" {
+  cat > "$ROOT/etc/passwd" <<'EOF'
+root:x:0:0:root:/root:/bin/bash
+alice:x:1000:1000:alice:/home/alice:/bin/bash
+EOF
+  cat > "$ROOT/etc/shadow" <<'EOF'
+root:$6$abc:19000:0:99999:7:::
+alice:$6$xyz:19000:0:99999:7:::
+EOF
+  cat > "$ROOT/etc/group" <<'EOF'
+wheel:x:10:
+sudo:x:27:
+EOF
+  reset_state
+  check_accounts
+  [ "$_N_ATTENTION" -eq 0 ]
+}

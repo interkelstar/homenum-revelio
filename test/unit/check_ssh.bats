@@ -28,4 +28,21 @@ setup() { src; reset_state; make_root; _PM=none; }
   printf 'PermitRootLogin no\nPasswordAuthentication no\n' > "$ROOT/etc/ssh/sshd_config"
   check_ssh
   ! emitted attention "authorized_keys"
+  ! emitted attention "PermitRootLogin"
+  ! emitted attention "PasswordAuthentication"
+}
+
+@test "options-prefixed key: type is the algorithm, not the options blob" {
+  echo 'command="/usr/bin/x",no-pty ssh-ed25519 AAAAC3Nz deploy@laptop' > "$ROOT/root/.ssh/authorized_keys"
+  check_ssh
+  emitted attention "type: ssh-ed25519"
+  emitted attention "deploy@laptop"
+  ! emitted attention "type: command"
+}
+
+@test "key with no comment shows comment (none)" {
+  echo 'ssh-rsa AAAAB3NzaC1yc2EAAAAD' > "$ROOT/root/.ssh/authorized_keys"
+  check_ssh
+  emitted attention "type: ssh-rsa"
+  emitted attention "comment: (none)"
 }
