@@ -197,8 +197,48 @@ parse_args() {
   done
 }
 
+# ---- checks ------------------------------------------------------------------
+
+# enumerate home directories (root + everything under /home) within REVELIO_ROOT
+_home_dirs() {
+  printf '%s\n' "$REVELIO_ROOT/root"
+  local d
+  for d in "$REVELIO_ROOT"/home/*; do [ -d "$d" ] && printf '%s\n' "$d"; done
+}
+
+check_ssh() {
+  local home ak line ftype comment mtime
+  # 1) authorized_keys in every home
+  while IFS= read -r home; do
+    ak="$home/.ssh/authorized_keys"
+    [ -f "$ak" ] || continue
+    mtime="$(date -r "$ak" '+%Y-%m-%d' 2>/dev/null || echo '?')"
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      case "$line" in \#*) continue ;; esac
+      ftype="${line%% *}"
+      comment="${line##* }"
+      emit attention ssh "SSH key in ${ak#"$REVELIO_ROOT"}" \
+        "type: $ftype"$'\n'"comment: $comment"$'\n'"file mtime: $mtime" \
+        "edit ${ak#"$REVELIO_ROOT"} and delete the line if you don't recognise it"
+    done < "$ak"
+  done < <(_home_dirs)
+
+  # 2) sshd_config danger knobs
+  local cfg="$REVELIO_ROOT/etc/ssh/sshd_config" key val
+  [ -f "$cfg" ] || return 0
+  while read -r key val; do
+    case "$key" in
+      PermitRootLogin)       [ "$val" = yes ] && emit attention ssh "PermitRootLogin yes" "root may log in over SSH" "set 'PermitRootLogin no' in $cfg" ;;
+      PasswordAuthentication)[ "$val" = yes ] && emit attention ssh "PasswordAuthentication yes" "password logins allowed (brute-forceable)" "set 'PasswordAuthentication no' in $cfg" ;;
+      AuthorizedKeysCommand) emit attention ssh "AuthorizedKeysCommand set" "sshd runs '$val' to fetch keys at login — a remote-key vector" "review/remove this line in $cfg" ;;
+      TrustedUserCAKeys)     emit attention ssh "TrustedUserCAKeys set" "cert-based access trusting CA '$val' — anyone with the CA private key can mint a login" "review/remove this line in $cfg" ;;
+    esac
+  done < <(grep -iE '^[[:space:]]*(PermitRootLogin|PasswordAuthentication|AuthorizedKeysCommand|TrustedUserCAKeys)[[:space:]]' "$cfg" 2>/dev/null) || true
+}
+
 run_all_checks() {
-  :  # check_* calls are appended here as each is implemented (Tasks 5-11)
+  check_ssh
 }
 
 revelio_main() {
