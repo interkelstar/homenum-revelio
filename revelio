@@ -237,8 +237,64 @@ check_ssh() {
   done < <(grep -iE '^[[:space:]]*(PermitRootLogin|PasswordAuthentication|AuthorizedKeysCommand|TrustedUserCAKeys)[[:space:]]' "$cfg" 2>/dev/null) || true
 }
 
+check_accounts() {
+  local passwd="$REVELIO_ROOT/etc/passwd"
+  local shadow="$REVELIO_ROOT/etc/shadow"
+  local group="$REVELIO_ROOT/etc/group"
+  local name pw uid gid gecos home shell
+
+  # 1) accounts: extra UID-0, human accounts with login shells
+  if [ -f "$passwd" ]; then
+    while IFS=: read -r name pw uid gid gecos home shell; do
+      [ -n "$name" ] || continue
+      if [ "$uid" = 0 ] && [ "$name" != root ]; then
+        emit attention accounts "Second UID 0 account: $name" \
+          "uid: 0 (root-equivalent)"$'\n'"home: $home"$'\n'"shell: $shell" \
+          "userdel $name   # if you didn't create it"
+      fi
+    done < "$passwd"
+  fi
+
+  # 2) empty-password accounts (shadow field 2 empty)
+  if [ -r "$shadow" ]; then
+    while IFS=: read -r name pw _; do
+      [ -n "$name" ] || continue
+      if [ -z "$pw" ]; then
+        emit attention accounts "Account with empty password: $name" \
+          "this account can log in with no password" "passwd -l $name   # lock it"
+      fi
+    done < "$shadow"
+  else
+    [ -f "$shadow" ] || blindspot "/etc/shadow (need root to read empty-password accounts)"
+  fi
+
+  # 3) sudoers NOPASSWD
+  local f
+  for f in "$REVELIO_ROOT/etc/sudoers" "$REVELIO_ROOT"/etc/sudoers.d/*; do
+    [ -f "$f" ] || continue
+    if grep -qiE 'NOPASSWD' "$f" 2>/dev/null; then
+      emit attention accounts "NOPASSWD sudoers rule in ${f#"$REVELIO_ROOT"}" \
+        "$(grep -iE 'NOPASSWD' "$f")" "review ${f#"$REVELIO_ROOT"} with visudo"
+    fi
+  done
+
+  # 4) dangerous group membership (docker == root-equivalent; wheel/sudo == admin)
+  if [ -f "$group" ]; then
+    local gname gpw ggid members
+    while IFS=: read -r gname gpw ggid members; do
+      [ -n "$members" ] || continue
+      case "$gname" in
+        docker) emit attention accounts "Members of docker group: $members" \
+                  "docker group membership is root-equivalent" "gpasswd -d <user> docker   # if unexpected" ;;
+        wheel|sudo) emit normal accounts "Members of $gname group: $members" "admin group membership" "" ;;
+      esac
+    done < "$group"
+  fi
+}
+
 run_all_checks() {
   check_ssh
+  check_accounts
 }
 
 revelio_main() {
