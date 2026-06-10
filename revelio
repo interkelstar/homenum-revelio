@@ -56,7 +56,13 @@ parse_args() {
     case "$1" in
       -v|--verbose) VERBOSE=1 ;;
       --no-color)   NO_COLOR_FLAG=1 ;;
-      --save)       shift; SAVE_FILE="${1:-}"; [ -n "$SAVE_FILE" ] || { echo "revelio: --save needs a FILE" >&2; exit 1; } ;;
+      --save)
+        shift
+        if [ $# -eq 0 ] || [[ "$1" == -* ]]; then
+          echo "revelio: --save needs a FILE" >&2; exit 1
+        fi
+        SAVE_FILE="$1"
+        ;;
       --thorough)   THOROUGH=1 ;;
       -h|--help)    usage; exit 0 ;;
       --version)    echo "revelio $VERSION"; exit 0 ;;

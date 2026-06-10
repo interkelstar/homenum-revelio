@@ -17,7 +17,7 @@ src() { # shellcheck disable=SC1090
   source "$REVELIO"; }
 
 # reset finding state between calls
-reset_state() { _ITEMS=(); _N_ATTENTION=0; _N_NORMAL=0; _BLINDSPOTS=(); }
+reset_state() { _ITEMS=(); _N_ATTENTION=0; _N_NORMAL=0; _BLINDSPOTS=(); _PM=""; }
 
 # did any record of TIER contain SUBSTR (in title or detail)?
 emitted() {

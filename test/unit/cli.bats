@@ -19,3 +19,15 @@ load ../helpers
   [ "$status" -eq 1 ]
   [[ "$output" == *"unknown option"* ]]
 }
+
+@test "--save without a filename (followed by a flag) exits 1 with an error" {
+  run bash "$REVELIO" --save --verbose
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--save needs a FILE"* ]]
+}
+
+@test "--save at end of args exits 1 with an error" {
+  run bash "$REVELIO" --save
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--save needs a FILE"* ]]
+}
