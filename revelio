@@ -302,9 +302,40 @@ check_accounts() {
   return 0
 }
 
+# best-effort: resolve a process name to its binary path (live system only)
+_resolve_bin() { command -v "$1" 2>/dev/null || true; }
+
+check_listening() {
+  if [ -n "$REVELIO_ROOT" ]; then
+    blindspot "listening sockets (live-only; not available when auditing REVELIO_ROOT=$REVELIO_ROOT)"
+    return 0
+  fi
+  local line addr proc pname bin
+  # -H omits header; -p needs root for full process info -> note blind spot if empty
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    addr="$(awk '{print $4}' <<<"$line")"
+    proc="$(grep -oE 'users:\(\("[^"]+"' <<<"$line" | sed -E 's/.*\("//; s/"$//')"
+    pname="${proc:-unknown}"
+    if [ -z "$proc" ]; then
+      blindspot "process names for listening sockets (need root for ss -p)"
+    fi
+    bin="$(_resolve_bin "$pname")"
+    if [ -n "$bin" ]; then
+      classify_provenance "$bin" listen "Listening: $addr ($pname)" \
+        "binary: $bin" "stop/remove the service if you don't recognise it"
+    else
+      emit attention listen "Listening: $addr ($pname)" \
+        "binary: unresolved" "identify the process: ss -tlnp | grep '$addr'"
+    fi
+  done < <(revelio_ss -tlnpH; revelio_ss -ulnpH)
+  return 0
+}
+
 run_all_checks() {
   check_ssh
   check_accounts
+  check_listening
 }
 
 revelio_main() {
