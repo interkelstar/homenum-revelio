@@ -404,12 +404,61 @@ check_scheduled() {
   return 0
 }
 
+check_persistence() {
+  local f line home
+
+  # 1) PAM modules that run code on every auth
+  for f in "$REVELIO_ROOT"/etc/pam.d/*; do
+    [ -f "$f" ] || continue
+    if grep -qE 'pam_exec\.so|pam_python|pam_script' "$f" 2>/dev/null; then
+      emit attention persist "PAM runs external code: ${f##*/}" \
+        "$(grep -E 'pam_exec\.so|pam_python|pam_script' "$f")" \
+        "review ${f#"$REVELIO_ROOT"} — pam_exec runs on every auth"
+    fi
+  done
+
+  # 2) ld.so.preload (LD_PRELOAD persistence / rootkit hook)
+  f="$REVELIO_ROOT/etc/ld.so.preload"
+  if [ -s "$f" ]; then
+    emit attention persist "/etc/ld.so.preload is non-empty" \
+      "preloads into EVERY process:"$'\n'"$(cat "$f")" \
+      "inspect each .so; empty the file if you didn't set it up"
+  fi
+
+  # 3) rc.local
+  f="$REVELIO_ROOT/etc/rc.local"
+  if [ -s "$f" ] && grep -qvE '^\s*(#|exit|$)' "$f" 2>/dev/null; then
+    emit attention persist "/etc/rc.local has boot commands" "$(grep -vE '^\s*(#|$)' "$f" | head)" \
+      "review /etc/rc.local"
+  fi
+
+  # 4) profile.d + shell rc files: look for fetch-exec / reverse shells
+  local targets=()
+  for f in "$REVELIO_ROOT"/etc/profile.d/*; do [ -f "$f" ] && targets+=("$f"); done
+  while IFS= read -r home; do
+    for f in "$home/.bashrc" "$home/.bash_profile" "$home/.profile" "$home/.zshrc"; do
+      [ -f "$f" ] && targets+=("$f")
+    done
+  done < <(_home_dirs)
+
+  for f in "${targets[@]:-}"; do
+    [ -f "$f" ] || continue
+    if grep -qE "$FETCHEXEC_RE|$REVSHELL_RE" "$f" 2>/dev/null; then
+      emit attention persist "Suspicious line in ${f#"$REVELIO_ROOT"}" \
+        "$(grep -nE "$FETCHEXEC_RE|$REVSHELL_RE" "$f" | head)" \
+        "edit ${f#"$REVELIO_ROOT"} and remove the line if you don't recognise it"
+    fi
+  done
+  return 0
+}
+
 run_all_checks() {
   check_ssh
   check_accounts
   check_listening
   check_tunnels
   check_scheduled
+  check_persistence
 }
 
 revelio_main() {
