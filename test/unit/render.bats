@@ -79,3 +79,11 @@ setup() { src; reset_state; USE_COLOR=0; setup_color; }
   out="$(revelio_render)"
   [[ "$out" == *"no package manager detected"* ]]
 }
+
+@test "blindspot deduplicates identical messages" {
+  reset_state
+  blindspot "same message"
+  blindspot "same message"
+  blindspot "other"
+  [ "${#_BLINDSPOTS[@]}" -eq 2 ]
+}

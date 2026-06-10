@@ -24,3 +24,10 @@ EOF
   check_tunnels
   [ "$_N_ATTENTION" -eq 0 ]
 }
+
+@test "REVELIO_ROOT (mounted image): live-only blindspot, no ps reads" {
+  make_root
+  check_tunnels
+  [ "${#_BLINDSPOTS[@]}" -eq 1 ]
+  [ "$_N_ATTENTION" -eq 0 ]
+}

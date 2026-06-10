@@ -51,7 +51,11 @@ emit() {
   esac
 }
 
-blindspot() { _BLINDSPOTS+=("$1"); }
+blindspot() {
+  local b
+  for b in "${_BLINDSPOTS[@]:-}"; do [ "$b" = "$1" ] && return 0; done
+  _BLINDSPOTS+=("$1")
+}
 
 _print_detail() { # indent each line of a (newline-joined) detail block
   local block="$1" pre="$2" l
