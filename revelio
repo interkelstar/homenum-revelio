@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# Homenum Revelio — reveal who else still has access to a host you were handed.
+# Read-only. No network. No writes (except --save). Read me before you run me:
+#   grep -nE 'curl|wget|/dev/tcp|/dev/udp|nc |ncat|telnet' revelio   # -> nothing
+set -u
+
+VERSION="0.1.0"
+
+# ---- globals -----------------------------------------------------------------
+REVELIO_ROOT="${REVELIO_ROOT:-}"   # read-prefix; "" means "/". e.g. /mnt for a mounted image
+REVELIO_SELF="$0"
+VERBOSE=0
+USE_COLOR=1
+NO_COLOR_FLAG=0
+SAVE_FILE=""
+THOROUGH=0
+
+_ITEMS=()
+_N_ATTENTION=0
+_N_NORMAL=0
+_BLINDSPOTS=()
+_PM=""
+
+# --- detection signatures (data we search FOR — NOT commands this tool runs) ----------
+# Trust note: these two lines are the ONLY place network tokens (curl/wget/nc//dev/tcp)
+# appear in this file. They are regexes matched against the CONTENTS of OTHER files.
+FETCHEXEC_RE='(curl|wget)[^|]*\| *(sh|bash|zsh)|base64 +(-d|--decode)[^|]*\| *(sh|bash)'
+REVSHELL_RE='bash -i|sh -i|/dev/tcp/|nc .*-e'
+
+# ---- cli ---------------------------------------------------------------------
+usage() {
+  cat <<'EOF'
+revelio — reveal standing-access paths a previous owner could retain.
+
+USAGE: revelio [options]
+
+OPTIONS:
+  -v, --verbose     also list package-owned ("distro-normal") items
+      --no-color    disable ANSI colour
+      --save FILE   write a plain-text copy of the report to FILE (the only write)
+      --thorough    scan all of / for setuid/capabilities (slower)
+  -h, --help        this help
+      --version     print version
+
+Exit code is an attention count, not a safety verdict:
+  0  nothing needs your eyes      10  items need your eyes      1  tool error
+
+This tool never says "SAFE". It hands you a complete inventory; you decide
+which entries you recognise. It makes no network calls and writes nothing
+unless you pass --save.
+EOF
+}
+
+parse_args() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -v|--verbose) VERBOSE=1 ;;
+      --no-color)   NO_COLOR_FLAG=1 ;;
+      --save)       shift; SAVE_FILE="${1:-}"; [ -n "$SAVE_FILE" ] || { echo "revelio: --save needs a FILE" >&2; exit 1; } ;;
+      --thorough)   THOROUGH=1 ;;
+      -h|--help)    usage; exit 0 ;;
+      --version)    echo "revelio $VERSION"; exit 0 ;;
+      *)            echo "revelio: unknown option: $1" >&2; exit 1 ;;
+    esac
+    shift
+  done
+}
+
+revelio_main() {
+  parse_args "$@"
+  echo "revelio $VERSION (skeleton)"   # replaced in Task 2
+  return 0
+}
+
+# ---- source-guard: run main only when executed, not when sourced ------------
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  revelio_main "$@"
+  exit $?
+fi
