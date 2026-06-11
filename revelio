@@ -254,11 +254,11 @@ check_accounts() {
   local passwd="$REVELIO_ROOT/etc/passwd"
   local shadow="$REVELIO_ROOT/etc/shadow"
   local group="$REVELIO_ROOT/etc/group"
-  local name pw uid gid gecos home shell
+  local name pw uid home shell
 
   # 1) accounts: extra UID-0, human accounts with login shells
   if [ -f "$passwd" ]; then
-    while IFS=: read -r name pw uid gid gecos home shell; do
+    while IFS=: read -r name pw uid _ _ home shell; do
       [ -n "$name" ] || continue
       if [ "$uid" = 0 ] && [ "$name" != root ]; then
         emit attention accounts "Second UID 0 account: $name" \
@@ -293,8 +293,8 @@ check_accounts() {
 
   # 4) dangerous group membership (docker == root-equivalent; wheel/sudo == admin)
   if [ -f "$group" ]; then
-    local gname gpw ggid members
-    while IFS=: read -r gname gpw ggid members; do
+    local gname members
+    while IFS=: read -r gname _ _ members; do
       [ -n "$members" ] || continue
       case "$gname" in
         docker) emit attention accounts "Members of docker group: $members" \
