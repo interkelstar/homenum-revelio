@@ -27,12 +27,23 @@ build_image() {
   [ "$status" -eq 10 ]
   [[ "$output" == *"evil@attacker"* ]]
   [[ "$output" == *"fetch-exec"* ]]
+  [[ "$output" == *"zz-backdoor"* ]]
 }
 
-@test "fedora: a real rpm-owned cron file lands in distro-normal (-v)" {
+@test "fedora: rpm-owned items land in distro-normal, planted backdoor in attention (-v)" {
   command -v podman >/dev/null || skip "podman not installed"
   build_image fedora
-  # crontabs package owns /etc/crontab on Fedora; run with -v and assert it's normal-tiered
   run podman run --rm --entrypoint /usr/local/bin/revelio "revelio-it-fedora" -v --no-color
-  [[ "$output" == *"distro-normal"* ]]
+  [ "$status" -eq 10 ]
+  # NON-ZERO distro-normal count proves real package-owned items (setuid binaries, etc.)
+  # were classified normal via rpm -qf — not the vacuous "header always prints" case:
+  local re='distro-normal \([1-9]'
+  [[ "$output" =~ $re ]]
+  # and the hand-dropped artifacts remain in the attention tier:
+  [[ "$output" == *"evil@attacker"* ]]
+  [[ "$output" == *"zz-backdoor"* ]]
+}
+
+teardown_file() {
+  command -v podman >/dev/null && podman rmi -f revelio-it-fedora revelio-it-debian >/dev/null 2>&1 || true
 }
