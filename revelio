@@ -472,13 +472,19 @@ check_escalation() {
     dirs=("$scan_root/usr" "$scan_root/bin" "$scan_root/sbin" "$scan_root/opt" "$scan_root/home" "$scan_root/root" "$scan_root/tmp" "$scan_root/var/tmp")
   fi
 
-  # setuid/setgid binaries
+  # -xdev stays within each start dir's filesystem (won't follow into separate mounts);
+  # acceptable for the common-dirs default. --thorough still honors -xdev from scan_root.
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     classify_provenance "$f" escalate "setuid/setgid binary: ${f#"$scan_root"}" \
       "perms: $(stat -c '%A' "$f" 2>/dev/null)" \
       "if hand-placed and unexpected: chmod u-s,g-s '${f#"$scan_root"}' or remove it"
   done < <(find "${dirs[@]}" -xdev -type f \( -perm -4000 -o -perm -2000 \) 2>/dev/null)
+
+  # non-root can't traverse root-only dirs; record the gap (mirrors the shadow/_readable pattern)
+  if [ -z "$REVELIO_ROOT" ] && [ -d /root ] && [ ! -x /root ]; then
+    blindspot "/root (setuid scan incomplete — need root to traverse)"
+  fi
 
   # file capabilities (live-only; getcap needs the real fs)
   if [ -z "$REVELIO_ROOT" ] && command -v getcap >/dev/null 2>&1; then
@@ -489,6 +495,8 @@ check_escalation() {
         "capabilities grant elevated powers without setuid" \
         "setcap -r '$capf'   # if unexpected"
     done < <(revelio_getcap -r "${dirs[@]}" 2>/dev/null)
+  elif [ -z "$REVELIO_ROOT" ]; then
+    blindspot "file capabilities (getcap not installed — install libcap or libcap2-bin to check)"
   fi
   return 0
 }

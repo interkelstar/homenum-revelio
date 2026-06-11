@@ -12,3 +12,19 @@ setup() { src; reset_state; make_root; }
   emitted attention "rootme"
   emitted normal "/usr/bin/sudo"
 }
+
+@test "clean root produces no escalation attention items" {
+  reset_state
+  check_escalation
+  [ "$_N_ATTENTION" -eq 0 ]
+}
+
+@test "setgid-only binary is also surfaced" {
+  _PM=rpm
+  pkg_owns() { return 1; }
+  mkdir -p "$ROOT/opt"
+  install -m 2755 /bin/true "$ROOT/opt/sgid_helper"
+  reset_state
+  check_escalation
+  emitted attention "sgid_helper"
+}
