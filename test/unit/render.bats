@@ -114,3 +114,12 @@ setup() { src; reset_state; USE_COLOR=0; setup_color; }
   out="$(revelio_render)"
   [[ "$out" == *"[...]"* ]]
 }
+
+@test "control bytes in blindspot messages are neutralized" {
+  reset_state
+  blindspot "$(printf 'badfile\033[2Jname (not readable without root)')"
+  out="$(revelio_render)"
+  [[ "$out" != *$'\033'* ]]      # no raw ESC in the rendered blindspot
+  [[ "$out" == *"badfile"* ]]    # printable text survives
+  [[ "$out" == *"name"* ]]
+}
