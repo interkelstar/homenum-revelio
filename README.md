@@ -12,7 +12,7 @@ This is a tool for checking that nobody left a backdoor — so it would be absur
 ask you to blindly trust it. It's one readable Bash file:
 
 ```sh
-curl -O https://raw.githubusercontent.com/agents-deployed/homenum-revelio/<commit>/revelio
+curl -O https://raw.githubusercontent.com/interkelstar/homenum-revelio/main/revelio
 less revelio          # read it — it's ~600 lines
 sh revelio            # then run it
 ```
