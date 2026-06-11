@@ -355,6 +355,13 @@ check_tunnels() {
   return 0
 }
 
+# 0 if readable; if it exists but isn't readable, record a blindspot and return 1
+_readable() {
+  [ -r "$1" ] && return 0
+  [ -e "$1" ] && blindspot "${1#"$REVELIO_ROOT"} (not readable without root)"
+  return 1
+}
+
 _is_fetch_exec() { # 0 if text pipes a download into a shell (or decodes into one)
   printf '%s' "$1" | grep -qE "$FETCHEXEC_RE"
 }
@@ -367,6 +374,7 @@ check_scheduled() {
            "$REVELIO_ROOT"/etc/cron.weekly/* "$REVELIO_ROOT"/etc/cron.monthly/* \
            "$REVELIO_ROOT/etc/crontab"; do
     [ -f "$f" ] || continue
+    _readable "$f" || continue
     content="$(grep -vE '^\s*(#|$)' "$f" 2>/dev/null | head -20)"
     local rem="remove ${f#"$REVELIO_ROOT"} if you didn't create it"
     local detail="file: ${f#"$REVELIO_ROOT"}"$'\n'"$content"
@@ -382,6 +390,7 @@ check_scheduled() {
   if [ -d "$spool" ]; then
     for f in "$spool"/* "$spool"/crontabs/*; do
       [ -f "$f" ] || continue
+      _readable "$f" || continue
       content="$(grep -vE '^\s*(#|$)' "$f" 2>/dev/null | head -20)"
       emit attention sched "User crontab: ${f##*/}" "file: ${f#"$REVELIO_ROOT"}"$'\n'"$content" \
         "crontab -u ${f##*/} -e   # review"
@@ -393,7 +402,6 @@ check_scheduled() {
     local unit
     while read -r unit _; do
       case "$unit" in *.timer)
-        local svc="${unit%.timer}.service"
         local path; path="$(systemctl show -p FragmentPath --value "$unit" 2>/dev/null)"
         if [ -n "$path" ]; then
           classify_provenance "$path" sched "systemd timer: $unit" "unit file: $path" "systemctl disable --now $unit   # if unexpected"
@@ -410,6 +418,7 @@ check_persistence() {
   # 1) PAM modules that run code on every auth
   for f in "$REVELIO_ROOT"/etc/pam.d/*; do
     [ -f "$f" ] || continue
+    _readable "$f" || continue
     if grep -qE 'pam_exec\.so|pam_python|pam_script' "$f" 2>/dev/null; then
       emit attention persist "PAM runs external code: ${f##*/}" \
         "$(grep -E 'pam_exec\.so|pam_python|pam_script' "$f")" \
@@ -419,7 +428,7 @@ check_persistence() {
 
   # 2) ld.so.preload (LD_PRELOAD persistence / rootkit hook)
   f="$REVELIO_ROOT/etc/ld.so.preload"
-  if [ -s "$f" ]; then
+  if [ -s "$f" ] && _readable "$f"; then
     emit attention persist "/etc/ld.so.preload is non-empty" \
       "preloads into EVERY process:"$'\n'"$(cat "$f")" \
       "inspect each .so; empty the file if you didn't set it up"
@@ -427,8 +436,8 @@ check_persistence() {
 
   # 3) rc.local
   f="$REVELIO_ROOT/etc/rc.local"
-  if [ -s "$f" ] && grep -qvE '^\s*(#|exit|$)' "$f" 2>/dev/null; then
-    emit attention persist "/etc/rc.local has boot commands" "$(grep -vE '^\s*(#|$)' "$f" | head)" \
+  if [ -s "$f" ] && _readable "$f" && grep -qvE '^\s*(#|exit|$)' "$f" 2>/dev/null; then
+    emit attention persist "/etc/rc.local has boot commands" "$(grep -vE '^\s*(#|exit|$)' "$f" | head)" \
       "review /etc/rc.local"
   fi
 
@@ -443,6 +452,7 @@ check_persistence() {
 
   for f in "${targets[@]:-}"; do
     [ -f "$f" ] || continue
+    _readable "$f" || continue
     if grep -qE "$FETCHEXEC_RE|$REVSHELL_RE" "$f" 2>/dev/null; then
       emit attention persist "Suspicious line in ${f#"$REVELIO_ROOT"}" \
         "$(grep -nE "$FETCHEXEC_RE|$REVSHELL_RE" "$f" | head)" \

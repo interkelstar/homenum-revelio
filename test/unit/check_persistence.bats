@@ -26,3 +26,9 @@ setup() { src; reset_state; make_root; _PM=none; }
   check_persistence
   emitted attention "profile.d"
 }
+
+@test "clean root produces no persistence attention items" {
+  reset_state
+  check_persistence
+  [ "$_N_ATTENTION" -eq 0 ]
+}
