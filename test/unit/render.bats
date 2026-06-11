@@ -87,3 +87,30 @@ setup() { src; reset_state; USE_COLOR=0; setup_color; }
   blindspot "other"
   [ "${#_BLINDSPOTS[@]}" -eq 2 ]
 }
+
+@test "control/escape bytes in hostile content are neutralized" {
+  reset_state
+  emit attention test "title" "$(printf 'evil\033[2Jmore\rtail\007')" ""
+  out="$(revelio_render)"
+  [[ "$out" != *$'\033'* ]]   # no raw ESC reaches output
+  [[ "$out" != *$'\r'* ]]     # no raw CR
+  [[ "$out" != *$'\007'* ]]   # no raw BEL
+  [[ "$out" == *"evil"* ]]    # printable text survives
+  [[ "$out" == *"more"* ]]
+  [[ "$out" == *"tail"* ]]
+}
+
+@test "record-delimiter bytes in hostile content don't corrupt the record" {
+  reset_state
+  emit attention test "$(printf 'a\037b')" "detail" ""   # \037 = our field delimiter \x1f
+  out="$(revelio_render)"
+  [[ "$out" == *"a?b"* ]]     # the \x1f was neutralized to ? and stayed in the title field
+}
+
+@test "over-long detail line is truncated" {
+  reset_state
+  local long; long="$(printf 'x%.0s' {1..500})"
+  emit attention test "title" "$long" ""
+  out="$(revelio_render)"
+  [[ "$out" == *"[...]"* ]]
+}

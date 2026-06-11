@@ -43,6 +43,9 @@ setup_color() {
 # emit TIER CATEGORY TITLE DETAIL [REMEDIATION]
 emit() {
   local tier="$1" category="$2" title="$3" detail="${4:-}" rem="${5:-}"
+  title="$(_sanitize "$title")"
+  detail="$(_sanitize "$detail")"
+  rem="$(_sanitize "$rem")"
   local pd="${detail//$'\n'/$'\x1e'}"          # pack newlines so the record is one line
   _ITEMS+=("$tier"$'\x1f'"$category"$'\x1f'"$title"$'\x1f'"$pd"$'\x1f'"$rem")
   case "$tier" in
@@ -57,10 +60,19 @@ blindspot() {
   _BLINDSPOTS+=("$1")
 }
 
+# replace control/escape bytes (keep TAB \011 and NEWLINE \012) with '?', so hostile
+# filenames / key comments / cron lines can't inject terminal escape/cursor/OSC sequences
+# into the operator's screen, corrupt the record framing, or hide findings. The '?' is
+# itself a signal that something non-printing was present.
+_sanitize() { printf '%s' "$1" | LC_ALL=C tr '\000-\010\013-\037\177' '?'; }
+
 _print_detail() { # indent each line of a (newline-joined) detail block
   local block="$1" pre="$2" l
   [ -n "$block" ] || return 0
-  while IFS= read -r l; do printf '      %s%s%s\n' "$pre" "$l" "$C_RST"; done < <(printf '%s\n' "${block%$'\n'}")
+  while IFS= read -r l; do
+    [ "${#l}" -gt 240 ] && l="${l:0:240} [...]"
+    printf '      %s%s%s\n' "$pre" "$l" "$C_RST"
+  done < <(printf '%s\n' "${block%$'\n'}")
 }
 
 revelio_render() {

@@ -20,6 +20,7 @@ sh revelio            # then run it
 - **No network.** `grep -nE 'curl|wget|/dev/tcp|/dev/udp|nc |ncat|telnet' revelio` → nothing.
 - **No writes.** Output goes to your terminal; `--save FILE` is the only write, and it's yours.
 - **No root required.** It runs as you and tells you exactly what it couldn't see without root.
+- **Safe to read.** Hostile content (a crafted key comment, a malicious filename) can't inject terminal escape sequences into your screen or the saved report — control bytes are neutralized to `?`, and over-long lines are capped with `[...]`.
 
 ## Usage
 
