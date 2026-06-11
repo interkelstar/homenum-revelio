@@ -462,6 +462,37 @@ check_persistence() {
   return 0
 }
 
+check_escalation() {
+  local scan_root="${REVELIO_ROOT:-/}" f
+  # default: common dirs; --thorough: whole tree
+  local dirs
+  if [ "$THOROUGH" -eq 1 ]; then
+    dirs=("$scan_root")
+  else
+    dirs=("$scan_root/usr" "$scan_root/bin" "$scan_root/sbin" "$scan_root/opt" "$scan_root/home" "$scan_root/root" "$scan_root/tmp" "$scan_root/var/tmp")
+  fi
+
+  # setuid/setgid binaries
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    classify_provenance "$f" escalate "setuid/setgid binary: ${f#"$scan_root"}" \
+      "perms: $(stat -c '%A' "$f" 2>/dev/null)" \
+      "if hand-placed and unexpected: chmod u-s,g-s '${f#"$scan_root"}' or remove it"
+  done < <(find "${dirs[@]}" -xdev -type f \( -perm -4000 -o -perm -2000 \) 2>/dev/null)
+
+  # file capabilities (live-only; getcap needs the real fs)
+  if [ -z "$REVELIO_ROOT" ] && command -v getcap >/dev/null 2>&1; then
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      local capf="${line%% *}"
+      classify_provenance "$capf" escalate "file capability: $line" \
+        "capabilities grant elevated powers without setuid" \
+        "setcap -r '$capf'   # if unexpected"
+    done < <(revelio_getcap -r "${dirs[@]}" 2>/dev/null)
+  fi
+  return 0
+}
+
 run_all_checks() {
   check_ssh
   check_accounts
@@ -469,6 +500,7 @@ run_all_checks() {
   check_tunnels
   check_scheduled
   check_persistence
+  check_escalation
 }
 
 revelio_main() {
