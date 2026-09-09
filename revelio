@@ -143,6 +143,25 @@ revelio_pm_detect() {
   else _PM=none; fi
 }
 
+# REVELIO_ROOT is used unvalidated as a find(1)/path prefix throughout; a value
+# beginning with '-' would be parsed by find as an expression (e.g. -delete),
+# and a relative value makes every ${REVELIO_ROOT}/etc/... path relative to
+# whatever the caller's cwd happens to be. Require empty or an absolute,
+# existing directory.
+_validate_revelio_root() {
+  local r="${REVELIO_ROOT:-}"
+  [ -z "$r" ] && return 0
+  case "$r" in
+    /*) ;;
+    *) echo "revelio: REVELIO_ROOT must be an absolute path (got: $r)" >&2; return 1 ;;
+  esac
+  if [ ! -d "$r" ]; then
+    echo "revelio: REVELIO_ROOT does not exist or is not a directory: $r" >&2
+    return 1
+  fi
+  return 0
+}
+
 # pkg_owns PATH -> 0 owned, 1 not owned, 2 undeterminable
 pkg_owns() {
   local p="$1"
@@ -229,8 +248,10 @@ check_ssh() {
   while IFS= read -r home; do
     ak="$home/.ssh/authorized_keys"
     [ -f "$ak" ] || continue
+    _within_revelio_root "$ak" || continue
     mtime="$(date -r "$ak" '+%Y-%m-%d' 2>/dev/null || echo '?')"
-    while IFS= read -r line; do
+    # `|| [ -n "$line" ]` picks up a final line with no trailing newline
+    while IFS= read -r line || [ -n "$line" ]; do
       [ -n "$line" ] || continue
       case "$line" in \#*) continue ;; esac
       local ktype="(unknown)" kcomment="(none)" _kf j
@@ -263,13 +284,53 @@ check_ssh() {
   return 0
 }
 
+# Enumerate every sudoers file that's actually in effect: /etc/sudoers,
+# /etc/sudoers.d/* (which a stock /etc/sudoers @includedir's in, but we scan
+# it directly too in case that directive was edited out), plus anything
+# reached transitively via @include/#include (one file) or
+# @includedir/#includedir (a whole directory) directives — sudo accepts
+# both the modern '@' and legacy '#' spelling of these directives.
+_sudoers_files() {
+  local queue=("$REVELIO_ROOT/etc/sudoers") seen=() f line inc target
+  for f in "$REVELIO_ROOT"/etc/sudoers.d/*; do [ -f "$f" ] && queue+=("$f"); done
+  while [ "${#queue[@]}" -gt 0 ]; do
+    f="${queue[0]}"; queue=("${queue[@]:1}")
+    case " ${seen[*]:-} " in *" $f "*) continue ;; esac
+    seen+=("$f")
+    [ -f "$f" ] || continue
+    printf '%s\n' "$f"
+    _within_revelio_root "$f" || continue
+    while IFS= read -r line; do
+      case "$line" in
+        '@include '*|'#include '*)
+          inc="${line#*include }"
+          target="$REVELIO_ROOT$inc"
+          [ -f "$target" ] && queue+=("$target")
+          ;;
+        '@includedir '*|'#includedir '*)
+          inc="${line#*includedir }"
+          for target in "$REVELIO_ROOT$inc"/*; do
+            [ -f "$target" ] && queue+=("$target")
+          done
+          ;;
+      esac
+    done < "$f" 2>/dev/null
+  done
+}
+
 check_accounts() {
   local passwd="$REVELIO_ROOT/etc/passwd"
   local shadow="$REVELIO_ROOT/etc/shadow"
   local group="$REVELIO_ROOT/etc/group"
   local name pw uid home shell
 
-  # 1) accounts: extra UID-0, human accounts with login shells
+  # 1) accounts: extra UID-0, human accounts with login shells, plus two
+  # quieter shapes of "someone left themselves a login": a UID<1000 (normally
+  # a system/service account) that nonetheless has a real shell AND a set
+  # password hash, or a UID>=1000 human-range account with a real shell but
+  # a home outside /home (so it doesn't look like the rest of the real users
+  # at a glance).
+  local shadow_pw
   if [ -f "$passwd" ]; then
     while IFS=: read -r name pw uid _ _ home shell; do
       [ -n "$name" ] || continue
@@ -277,6 +338,28 @@ check_accounts() {
         emit attention accounts "Second UID 0 account: $name" \
           "uid: 0 (root-equivalent)"$'\n'"home: $home"$'\n'"shell: $shell" \
           "userdel $name   # if you didn't create it"
+        continue
+      fi
+      case "$shell" in
+        */nologin|*/false|"") continue ;;
+      esac
+      if [ "$uid" -gt 0 ] 2>/dev/null && [ "$uid" -lt 1000 ] 2>/dev/null && [ -r "$shadow" ]; then
+        shadow_pw="$(awk -F: -v u="$name" '$1==u{print $2}' "$shadow" 2>/dev/null)"
+        case "$shadow_pw" in
+          ''|'!'|'!'*|'*'|'*'*) : ;;   # locked / no password set — not login-capable
+          *)
+            emit attention accounts "Login-capable low-UID account: $name" \
+              "uid: $uid (< 1000, normally a system account)"$'\n'"home: $home"$'\n'"shell: $shell" \
+              "passwd -l $name   # if you didn't intend this account to log in"
+            ;;
+        esac
+      elif [ "$uid" -ge 1000 ] 2>/dev/null; then
+        case "$home" in
+          /home/*|/root) : ;;
+          *) emit attention accounts "Human-range account with home outside /home: $name" \
+               "uid: $uid"$'\n'"home: $home"$'\n'"shell: $shell" \
+               "review the account — a real user's home is normally under /home" ;;
+        esac
       fi
     done < "$passwd"
   fi
@@ -294,15 +377,18 @@ check_accounts() {
     [ -f "$shadow" ] && blindspot "/etc/shadow (need root to read empty-password accounts)"
   fi
 
-  # 3) sudoers NOPASSWD
+  # 3) sudoers NOPASSWD — including rules that only live in a file reached via
+  # @include/#include (single file) or @includedir/#includedir (a whole dir),
+  # which /etc/sudoers.d is itself conventionally pulled in through.
   local f
-  for f in "$REVELIO_ROOT/etc/sudoers" "$REVELIO_ROOT"/etc/sudoers.d/*; do
+  while IFS= read -r f; do
     [ -f "$f" ] || continue
+    _within_revelio_root "$f" || continue
     if grep -qiE 'NOPASSWD' "$f" 2>/dev/null; then
       emit attention accounts "NOPASSWD sudoers rule in ${f#"$REVELIO_ROOT"}" \
         "$(grep -iE 'NOPASSWD' "$f")" "review ${f#"$REVELIO_ROOT"} with visudo"
     fi
-  done
+  done < <(_sudoers_files)
 
   # 4) dangerous group membership (docker == root-equivalent; wheel/sudo == admin)
   if [ -f "$group" ]; then
@@ -354,15 +440,23 @@ check_tunnels() {
     blindspot "outbound tunnels (live-only; not available when auditing REVELIO_ROOT)"
     return 0
   fi
-  local line cmd
+  local line cmd argv0 base
   while IFS= read -r line; do
     cmd="${line#"${line%%[![:space:]]*}"}"   # ltrim
     cmd="${cmd#* }"                            # drop pid column
-    case "$cmd" in
-      autossh*) emit attention tunnel "autossh persistent tunnel" "cmd: $cmd" "kill the autossh process / remove its unit if unexpected" ;;
-      *ssh*-R*) emit attention tunnel "ssh reverse tunnel (-R)" "cmd: $cmd" "kill the ssh -R process if unexpected" ;;
-      *cloudflared*tunnel*) emit attention tunnel "cloudflared tunnel running" "cmd: $cmd" "this exposes the box outward; remove if you didn't set it up" ;;
-      *ngrok*|*frpc*|*frps*|*tailscaled*|*zerotier*) emit attention tunnel "remote-access daemon: ${cmd%% *}" "cmd: $cmd" "remove the daemon if you didn't set it up" ;;
+    argv0="${cmd%% *}"
+    base="${argv0##*/}"   # match on the binary name, not the full invocation path
+    case "$base" in
+      autossh) emit attention tunnel "autossh persistent tunnel" "cmd: $cmd" "kill the autossh process / remove its unit if unexpected" ;;
+      *) case "$cmd" in
+           # -R (short reverse-forward) or its `-o Key=Value` equivalents:
+           # RemoteForward= sets up the same reverse tunnel; ProxyCommand can
+           # pipe the connection through anything, including a tunnel binary.
+           *ssh*-R*|*ssh*RemoteForward*|*ssh*ProxyCommand*)
+             emit attention tunnel "ssh reverse tunnel / proxy" "cmd: $cmd" "kill the ssh process if unexpected" ;;
+           *cloudflared*tunnel*) emit attention tunnel "cloudflared tunnel running" "cmd: $cmd" "this exposes the box outward; remove if you didn't set it up" ;;
+           *ngrok*|*frpc*|*frps*|*tailscaled*|*zerotier*) emit attention tunnel "remote-access daemon: ${cmd%% *}" "cmd: $cmd" "remove the daemon if you didn't set it up" ;;
+         esac ;;
     esac
   done < <(revelio_ps -eo pid=,args= 2>/dev/null)
   return 0
@@ -373,6 +467,23 @@ _readable() {
   [ -r "$1" ] && return 0
   [ -e "$1" ] && blindspot "${1#"$REVELIO_ROOT"} (not readable without root)"
   return 1
+}
+
+# When REVELIO_ROOT is set (auditing a mounted image, not the live host),
+# refuse to follow any path whose realpath resolves outside REVELIO_ROOT.
+# Without this, a symlink planted inside the image (e.g. a fixed-up
+# etc/pam.d entry pointing at /etc/hostname) would make us read and quote a
+# LIVE-HOST file into the report. When REVELIO_ROOT is empty (auditing the
+# live host itself) there is no "outside" to escape, so this is a no-op.
+_within_revelio_root() {
+  local p="$1" rp rr
+  [ -n "$REVELIO_ROOT" ] || return 0
+  rp="$(realpath -e "$p" 2>/dev/null)" || return 0   # nonexistent target: let normal -f/-e checks handle it
+  rr="$(realpath -e "$REVELIO_ROOT" 2>/dev/null)" || return 0
+  case "$rp" in
+    "$rr"|"$rr"/*) return 0 ;;
+    *) blindspot "skipped symlink escaping REVELIO_ROOT: ${p#"$REVELIO_ROOT"} -> $rp"; return 1 ;;
+  esac
 }
 
 _is_fetch_exec() { # 0 if text pipes a download into a shell (or decodes into one)
@@ -387,6 +498,7 @@ check_scheduled() {
            "$REVELIO_ROOT"/etc/cron.weekly/* "$REVELIO_ROOT"/etc/cron.monthly/* \
            "$REVELIO_ROOT/etc/crontab"; do
     [ -f "$f" ] || continue
+    _within_revelio_root "$f" || continue
     _readable "$f" || continue
     content="$(grep -vE '^\s*(#|$)' "$f" 2>/dev/null | head -20)"
     local rem="remove ${f#"$REVELIO_ROOT"} if you didn't create it"
@@ -403,6 +515,7 @@ check_scheduled() {
   if [ -d "$spool" ]; then
     for f in "$spool"/* "$spool"/crontabs/*; do
       [ -f "$f" ] || continue
+      _within_revelio_root "$f" || continue
       _readable "$f" || continue
       content="$(grep -vE '^\s*(#|$)' "$f" 2>/dev/null | head -20)"
       emit attention sched "User crontab: ${f##*/}" "file: ${f#"$REVELIO_ROOT"}"$'\n'"$content" \
@@ -422,6 +535,63 @@ check_scheduled() {
       ;; esac
     done < <(systemctl list-timers --all --no-legend 2>/dev/null | awk '{print $NF}')
   fi
+
+  # system-wide systemd timer UNIT FILES (works against REVELIO_ROOT too,
+  # unlike the live-only `systemctl list-timers` above)
+  for f in "$REVELIO_ROOT"/etc/systemd/system/*.timer; do
+    [ -f "$f" ] || continue
+    _within_revelio_root "$f" || continue
+    _readable "$f" || continue
+    content="$(grep -vE '^\s*(#|;|$)' "$f" 2>/dev/null | head -20)"
+    classify_provenance "$f" sched "systemd timer unit: ${f##*/}" \
+      "file: ${f#"$REVELIO_ROOT"}"$'\n'"$content" \
+      "systemctl disable --now ${f##*/}   # if unexpected; then remove ${f#"$REVELIO_ROOT"}"
+  done
+
+  # per-user systemd timers (~/.config/systemd/user/*.timer)
+  local home
+  while IFS= read -r home; do
+    for f in "$home"/.config/systemd/user/*.timer; do
+      [ -f "$f" ] || continue
+      _within_revelio_root "$f" || continue
+      _readable "$f" || continue
+      content="$(grep -vE '^\s*(#|;|$)' "$f" 2>/dev/null | head -20)"
+      emit attention sched "user systemd timer: ${f##*/}" \
+        "file: ${f#"$REVELIO_ROOT"}"$'\n'"$content" \
+        "systemctl --user disable --now ${f##*/}   # if unexpected; then remove ${f#"$REVELIO_ROOT"}"
+    done
+  done < <(_home_dirs)
+
+  # at(1) spool jobs — location varies by distro
+  local atdir
+  for atdir in "$REVELIO_ROOT/var/spool/cron/atjobs" "$REVELIO_ROOT/var/spool/at/spool" \
+               "$REVELIO_ROOT/var/spool/atjobs" "$REVELIO_ROOT/var/spool/at"; do
+    [ -d "$atdir" ] || continue
+    for f in "$atdir"/*; do
+      [ -f "$f" ] || continue
+      case "${f##*/}" in .SEQ|spool) continue ;; esac
+      _within_revelio_root "$f" || continue
+      _readable "$f" || continue
+      content="$(grep -vE '^\s*(#|$)' "$f" 2>/dev/null | head -20)"
+      local rem="atrm ${f##*/}   # if unexpected, or remove ${f#"$REVELIO_ROOT"}"
+      local detail="file: ${f#"$REVELIO_ROOT"}"$'\n'"$content"
+      if _is_fetch_exec "$content"; then
+        emit attention sched "at(1) job that fetch-execs: ${f##*/}" "$detail" "$rem"
+      else
+        emit attention sched "at(1) job: ${f##*/}" "$detail" "$rem"
+      fi
+    done
+  done
+
+  # anacron: /etc/anacrontab (its presence/content is not package-owned even
+  # though the anacron binary and /etc/cron.d/anacron typically are)
+  f="$REVELIO_ROOT/etc/anacrontab"
+  if [ -f "$f" ] && _within_revelio_root "$f" && _readable "$f"; then
+    content="$(grep -vE '^\s*(#|$)' "$f" 2>/dev/null | head -20)"
+    emit attention sched "anacrontab: ${f#"$REVELIO_ROOT"}" \
+      "file: ${f#"$REVELIO_ROOT"}"$'\n'"$content" \
+      "review ${f#"$REVELIO_ROOT"} — anacron entries run scheduled jobs even after downtime"
+  fi
   return 0
 }
 
@@ -431,6 +601,7 @@ check_persistence() {
   # 1) PAM modules that run code on every auth
   for f in "$REVELIO_ROOT"/etc/pam.d/*; do
     [ -f "$f" ] || continue
+    _within_revelio_root "$f" || continue
     _readable "$f" || continue
     if grep -qE 'pam_exec\.so|pam_python|pam_script' "$f" 2>/dev/null; then
       emit attention persist "PAM runs external code: ${f##*/}" \
@@ -441,7 +612,7 @@ check_persistence() {
 
   # 2) ld.so.preload (LD_PRELOAD persistence / rootkit hook)
   f="$REVELIO_ROOT/etc/ld.so.preload"
-  if [ -s "$f" ] && _readable "$f"; then
+  if [ -s "$f" ] && _within_revelio_root "$f" && _readable "$f"; then
     emit attention persist "/etc/ld.so.preload is non-empty" \
       "preloads into EVERY process:"$'\n'"$(cat "$f")" \
       "inspect each .so; empty the file if you didn't set it up"
@@ -449,7 +620,7 @@ check_persistence() {
 
   # 3) rc.local
   f="$REVELIO_ROOT/etc/rc.local"
-  if [ -s "$f" ] && _readable "$f" && grep -qvE '^\s*(#|exit|$)' "$f" 2>/dev/null; then
+  if [ -s "$f" ] && _within_revelio_root "$f" && _readable "$f" && grep -qvE '^\s*(#|exit|$)' "$f" 2>/dev/null; then
     emit attention persist "/etc/rc.local has boot commands" "$(grep -vE '^\s*(#|exit|$)' "$f" | head)" \
       "review /etc/rc.local"
   fi
@@ -465,6 +636,7 @@ check_persistence() {
 
   for f in "${targets[@]:-}"; do
     [ -f "$f" ] || continue
+    _within_revelio_root "$f" || continue
     _readable "$f" || continue
     if grep -qE "$FETCHEXEC_RE|$REVSHELL_RE" "$f" 2>/dev/null; then
       emit attention persist "Suspicious line in ${f#"$REVELIO_ROOT"}" \
@@ -487,12 +659,12 @@ check_escalation() {
 
   # -xdev stays within each start dir's filesystem (won't follow into separate mounts);
   # acceptable for the common-dirs default. --thorough still honors -xdev from scan_root.
-  while IFS= read -r f; do
+  while IFS= read -r -d '' f; do
     [ -n "$f" ] || continue
     classify_provenance "$f" escalate "setuid/setgid binary: ${f#"$scan_root"}" \
       "perms: $(stat -c '%A' "$f" 2>/dev/null)" \
       "if hand-placed and unexpected: chmod u-s,g-s '${f#"$scan_root"}' or remove it"
-  done < <(find "${dirs[@]}" -xdev -type f \( -perm -4000 -o -perm -2000 \) 2>/dev/null)
+  done < <(find "${dirs[@]}" -xdev -type f \( -perm -4000 -o -perm -2000 \) -print0 2>/dev/null)
 
   # non-root can't traverse root-only dirs; record the gap (mirrors the shadow/_readable pattern)
   if [ -z "$REVELIO_ROOT" ] && [ -d /root ] && [ ! -x /root ]; then
@@ -526,13 +698,27 @@ run_all_checks() {
 
 revelio_main() {
   parse_args "$@"
+  _validate_revelio_root || exit 1
   setup_color
   revelio_pm_detect
   run_all_checks
   local out; out="$(revelio_render)"
   printf '%s\n' "$out"
   if [ -n "$SAVE_FILE" ]; then
-    printf '%s\n' "$out" | strip_ansi > "$SAVE_FILE"
+    # Refuse to write through a symlink (would write to whatever it points at,
+    # possibly outside anything the caller intended) and refuse anything that
+    # exists but isn't a plain regular file. New files are created 0600 via
+    # umask, since the report may contain key comments, filenames, and other
+    # details the operator wouldn't want world/group-readable.
+    if [ -L "$SAVE_FILE" ]; then
+      echo "revelio: --save FILE must not be a symlink: $SAVE_FILE" >&2
+      exit 1
+    fi
+    if [ -e "$SAVE_FILE" ] && [ ! -f "$SAVE_FILE" ]; then
+      echo "revelio: --save FILE exists and is not a regular file: $SAVE_FILE" >&2
+      exit 1
+    fi
+    ( umask 077 && printf '%s\n' "$out" | strip_ansi > "$SAVE_FILE" )
   fi
   [ "$_N_ATTENTION" -gt 0 ] && return 10
   return 0

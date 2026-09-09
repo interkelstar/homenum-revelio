@@ -27,9 +27,12 @@ setup() { src; reset_state; make_root; _PM=none; }
 @test "no keys, hardened config -> no ssh attention items" {
   printf 'PermitRootLogin no\nPasswordAuthentication no\n' > "$ROOT/etc/ssh/sshd_config"
   check_ssh
-  ! emitted attention "authorized_keys"
-  ! emitted attention "PermitRootLogin"
-  ! emitted attention "PasswordAuthentication"
+  run emitted attention "authorized_keys"
+  [ "$status" -ne 0 ]
+  run emitted attention "PermitRootLogin"
+  [ "$status" -ne 0 ]
+  run emitted attention "PasswordAuthentication"
+  [ "$status" -ne 0 ]
 }
 
 @test "options-prefixed key: type is the algorithm, not the options blob" {
@@ -37,7 +40,8 @@ setup() { src; reset_state; make_root; _PM=none; }
   check_ssh
   emitted attention "type: ssh-ed25519"
   emitted attention "deploy@laptop"
-  ! emitted attention "type: command"
+  run emitted attention "type: command"
+  [ "$status" -ne 0 ]
 }
 
 @test "key with no comment shows comment (none)" {
