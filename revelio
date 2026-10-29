@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Homenum Revelio — reveal who else still has access to a host you were handed.
 # Read-only. No network. No writes (except --save). Read me before you run me:
-#   grep -nE 'curl|wget|/dev/tcp|/dev/udp|nc |ncat|telnet' revelio   # -> nothing
+#   grep -nE 'curl|wget|/dev/tcp|/dev/udp|nc |ncat|telnet' revelio   # -> only the two signature regexes below
 set -u
 
 VERSION="0.1.0"

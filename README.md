@@ -12,12 +12,14 @@ This is a tool for checking that nobody left a backdoor — so it would be absur
 ask you to blindly trust it. It's one readable Bash file:
 
 ```sh
-curl -O https://raw.githubusercontent.com/interkelstar/homenum-revelio/main/revelio
-less revelio          # read it — it's ~600 lines
-sh revelio            # then run it
+curl -O https://raw.githubusercontent.com/interkelstar/homenum-revelio/v0.1.0/revelio
+less revelio          # read it — it's ~730 lines
+bash revelio          # then run it (it is bash, not POSIX sh)
 ```
 
-- **No network.** `grep -nE 'curl|wget|/dev/tcp|/dev/udp|nc |ncat|telnet' revelio` → nothing.
+The link pins a tag, never main — read exactly what you run.
+
+- **No network.** `grep -nE 'curl|wget|/dev/tcp|/dev/udp|nc |ncat|telnet' revelio` → only the two detection-signature regexes (`FETCHEXEC_RE`, `REVSHELL_RE`, patterns searched for in *other* files) and the comment that says so; no command line.
 - **No writes.** Output goes to your terminal; `--save FILE` is the only write, and it's yours.
 - **No root required.** It runs as you and tells you exactly what it couldn't see without root.
 - **Safe to read.** Hostile content (a crafted key comment, a malicious filename) can't inject terminal escape sequences into your screen or the saved report — control bytes are neutralized to `?`, and over-long lines are capped with `[...]`.
@@ -28,8 +30,9 @@ sh revelio            # then run it
 revelio [-v] [--no-color] [--save FILE] [--thorough]
 ```
 
-Exit code is an **attention count, not a verdict**: `0` nothing needs your eyes,
-`10` items need your eyes, `1` tool error.
+Exit code is a flag, not a count and not a verdict: `0` nothing needs your attention,
+`10` at least one finding needs your attention (always `10`, however many there are),
+`1` the tool's own error (bad option, bad `REVELIO_ROOT`, refused `--save` target).
 
 `REVELIO_ROOT=/mnt revelio` audits a mounted disk image instead of the live system.
 
