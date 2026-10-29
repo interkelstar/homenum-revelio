@@ -1,5 +1,9 @@
 # Homenum Revelio
 
+[![CI](https://github.com/interkelstar/homenum-revelio/actions/workflows/ci.yml/badge.svg)](https://github.com/interkelstar/homenum-revelio/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/interkelstar/homenum-revelio/badge)](https://scorecard.dev/viewer/?uri=github.com/interkelstar/homenum-revelio)
+· [Security policy](SECURITY.md)
+
 `revelio` reveals who else still has a way into a Linux host you were just handed —
 a bought/inherited VPS, a contractor's leftover box, a server someone set up for you.
 It prints a **complete inventory** of every standing-access path and tells you which

@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: bats unit suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: install bats
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q bats
+      - name: run unit tests
+        run: bats test/unit
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: shellcheck (warning level)
+        run: |
+          shellcheck --version
+          shellcheck -S warning revelio release.sh
+
+  shellcheck-sarif:
+    name: shellcheck to code scanning
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      # ShellCheck itself has no SARIF output (0.11.0: checkstyle, diff, gcc, json, json1, quiet, tty);
+      # shellcheck-sarif converts its `-f json` output (an array; `json1` wraps it in an object).
+      - name: install shellcheck-sarif
+        run: cargo install shellcheck-sarif --version 0.8.0 --locked
+      - name: shellcheck (warning level) as SARIF
+        run: |
+          shellcheck -S warning -f json revelio > shellcheck.json || true
+          shellcheck-sarif < shellcheck.json > shellcheck.sarif
+      - name: upload to code scanning
+        uses: github/codeql-action/upload-sarif@4bfa242aa49c5f7c6770b98670d354a7dfac05f8 # v3
+        with:
+          sarif_file: shellcheck.sarif
+          category: shellcheck
