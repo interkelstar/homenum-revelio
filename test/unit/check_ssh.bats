@@ -9,6 +9,18 @@ setup() { src; reset_state; make_root; _PM=none; }
   emitted attention "deploy@laptop"
 }
 
+@test "unreadable authorized_keys blindspots, leaks no open error" {
+  [ "$(id -u)" -eq 0 ] && skip "must run as non-root to make authorized_keys unreadable"
+  echo 'ssh-ed25519 AAAAC3Nz... deploy@laptop' > "$ROOT/root/.ssh/authorized_keys"
+  chmod 000 "$ROOT/root/.ssh/authorized_keys"
+  reset_state
+  run check_ssh
+  [[ "$output" != *"Permission denied"* ]]
+  reset_state
+  check_ssh
+  [[ " ${_BLINDSPOTS[*]:-} " == *"authorized_keys"* ]]
+}
+
 @test "flags PermitRootLogin yes and PasswordAuthentication yes" {
   printf 'PermitRootLogin yes\nPasswordAuthentication yes\n' > "$ROOT/etc/ssh/sshd_config"
   check_ssh

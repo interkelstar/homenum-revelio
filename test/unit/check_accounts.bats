@@ -54,6 +54,31 @@ EOF
   [[ " ${_BLINDSPOTS[*]:-} " == *"/etc/shadow"* ]]
 }
 
+@test "unreadable /etc/sudoers emits a blindspot and leaks no open error" {
+  [ "$(id -u)" -eq 0 ] && skip "must run as non-root to make sudoers unreadable"
+  echo 'alice ALL=(ALL) NOPASSWD: ALL' > "$ROOT/etc/sudoers"
+  chmod 000 "$ROOT/etc/sudoers"
+  reset_state
+  run check_accounts
+  [[ "$output" != *"Permission denied"* ]]
+  reset_state
+  check_accounts
+  [[ " ${_BLINDSPOTS[*]:-} " == *"/etc/sudoers"* ]]
+}
+
+@test "unreadable @include'd sudoers file blindspots, not silently skipped" {
+  [ "$(id -u)" -eq 0 ] && skip "must run as non-root to make the include unreadable"
+  printf '@include /etc/sudoers.inc\n' > "$ROOT/etc/sudoers"
+  printf 'alice ALL=(ALL) NOPASSWD: ALL\n' > "$ROOT/etc/sudoers.inc"
+  chmod 000 "$ROOT/etc/sudoers.inc"
+  reset_state
+  run check_accounts
+  [[ "$output" != *"Permission denied"* ]]
+  reset_state
+  check_accounts
+  [[ " ${_BLINDSPOTS[*]:-} " == *"/etc/sudoers.inc"* ]]
+}
+
 @test "clean accounts fixture -> no attention items" {
   cat > "$ROOT/etc/passwd" <<'EOF'
 root:x:0:0:root:/root:/bin/bash

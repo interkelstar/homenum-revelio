@@ -249,6 +249,7 @@ check_ssh() {
     ak="$home/.ssh/authorized_keys"
     [ -f "$ak" ] || continue
     _within_revelio_root "$ak" || continue
+    _readable "$ak" || continue   # another user's 0600 keys in an 0755 home — blindspot, don't leak an open error
     mtime="$(date -r "$ak" '+%Y-%m-%d' 2>/dev/null || echo '?')"
     # `|| [ -n "$line" ]` picks up a final line with no trailing newline
     while IFS= read -r line || [ -n "$line" ]; do
@@ -300,6 +301,7 @@ _sudoers_files() {
     [ -f "$f" ] || continue
     printf '%s\n' "$f"
     _within_revelio_root "$f" || continue
+    [ -r "$f" ] || continue   # unreadable (e.g. /etc/sudoers is 0440 — no root) — skip, don't leak an open error
     while IFS= read -r line; do
       case "$line" in
         '@include '*|'#include '*)
@@ -380,10 +382,14 @@ check_accounts() {
   # 3) sudoers NOPASSWD — including rules that only live in a file reached via
   # @include/#include (single file) or @includedir/#includedir (a whole dir),
   # which /etc/sudoers.d is itself conventionally pulled in through.
+  if [ -d "$REVELIO_ROOT/etc/sudoers.d" ] && [ ! -r "$REVELIO_ROOT/etc/sudoers.d" ]; then
+    blindspot "/etc/sudoers.d/ (need root to enumerate)"
+  fi
   local f
   while IFS= read -r f; do
     [ -f "$f" ] || continue
     _within_revelio_root "$f" || continue
+    _readable "$f" || continue   # top file, sudoers.d entry or an @include'd file we can't read — blindspot it
     if grep -qiE 'NOPASSWD' "$f" 2>/dev/null; then
       emit attention accounts "NOPASSWD sudoers rule in ${f#"$REVELIO_ROOT"}" \
         "$(grep -iE 'NOPASSWD' "$f")" "review ${f#"$REVELIO_ROOT"} with visudo"
